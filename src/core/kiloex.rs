@@ -10,6 +10,7 @@ use alloy::{
     sol,
     sol_types::SolCall,
 };
+use log::info;
 use reqwest::Client;
 use serde::Deserialize;
 use serde_json::from_str;
@@ -189,6 +190,6 @@ where
         .with_to(DEX_CA);
 
     let claim_amount_ethers = (claim_data.amount / 1e18 as u128) as f64;
-    println!("Try to claim {} {}", claim_amount_ethers, token.ticker());
+    info!("Try to claim {} {}", claim_amount_ethers, token.ticker());
     evm_client.send_transaction(tx, Some(TxType::Legacy)).await
 }

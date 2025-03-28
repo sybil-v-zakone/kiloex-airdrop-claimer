@@ -9,6 +9,7 @@ use std::{str::FromStr, sync::Arc, time::Duration};
 use alloy::{providers::ProviderBuilder, signers::local::PrivateKeySigner};
 use alloy_chains::Chain;
 use config::Config;
+use log::{error, info, warn};
 use reqwest::{Client, redirect::Policy};
 use url::Url;
 
@@ -20,6 +21,10 @@ mod error;
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    pretty_env_logger::formatted_timed_builder()
+        .filter_level(log::LevelFilter::Info)
+        .init();
+
     const PRIVATE_KEYS_FILE_PATH: &str = "data/private_keys.txt";
     const PROXIES_FILE_PATH: &str = "data/proxies.txt";
 
@@ -28,7 +33,7 @@ async fn main() -> Result<()> {
     let proxies = read_lines(PROXIES_FILE_PATH).await?;
 
     if private_keys.len() != proxies.len() && config.use_proxy {
-        eprintln!("Warning: Private keys length not equal proxies length");
+        warn!("Warning: Private keys length not equal proxies length");
     }
 
     for (i, private_key) in private_keys.iter().enumerate() {
@@ -39,21 +44,21 @@ async fn main() -> Result<()> {
             None
         };
 
-        println!("Processing account {}/{}", account_num, private_keys.len());
+        info!("Processing account {}/{}", account_num, private_keys.len());
 
         match process_account(private_key, proxy, config.clone()).await {
             Ok(_) => println!(""),
-            Err(e) => eprintln!("Error processing account {}: {}", account_num, e),
+            Err(e) => error!("Error processing account {}: {}", account_num, e),
         }
 
         if account_num < private_keys.len() {
             let sleep_time = random_in_range(config.sleep_range);
-            println!("Sleep {} seconds", sleep_time);
+            info!("Sleep {} seconds", sleep_time);
             tokio::time::sleep(Duration::from_secs(sleep_time)).await;
         }
     }
 
-    println!("All accounts processed!");
+    info!("All accounts processed!");
 
     Ok(())
 }
@@ -83,19 +88,19 @@ pub async fn process_account(
     let kiloex_claim_data = get_claim_data(&evm_client, &http_client).await?;
 
     if kiloex_claim_data.status == AirdropStatus::NotEligible {
-        eprintln!("This wallet is not eligible for airdrop");
+        warn!("This wallet is not eligible for airdrop");
         return Ok(());
     }
 
     if let Some(_) = kiloex_claim_data.kilo {
         match claim(&evm_client, kiloex_claim_data.clone(), Token::KILO).await {
-            Ok(_) => println!("Successfully claimed KILO tokens"),
+            Ok(_) => info!("Successfully claimed KILO tokens"),
             Err(e) => {
                 let err_str = e.to_string();
                 if err_str.contains("Already claimed") {
-                    eprintln!("Airdrop has been claimed earlier");
+                    warn!("Airdrop has been claimed earlier");
                 } else {
-                    eprintln!("Failed to claim KILO tokens: {}", err_str);
+                    error!("Failed to claim KILO tokens: {}", err_str);
                 }
             }
         }
@@ -103,13 +108,13 @@ pub async fn process_account(
 
     if let Some(_) = kiloex_claim_data.xkilo {
         match claim(&evm_client, kiloex_claim_data, Token::XKILO).await {
-            Ok(_) => println!("Successfully claimed xKILO tokens"),
+            Ok(_) => info!("Successfully claimed xKILO tokens"),
             Err(e) => {
                 let err_str = e.to_string();
                 if err_str.contains("Already claimed") {
-                    eprintln!("Airdrop has been claimed earlier");
+                    warn!("Airdrop has been claimed earlier");
                 } else {
-                    eprintln!("Failed to claim xKILO tokens: {}", err_str);
+                    error!("Failed to claim xKILO tokens: {}", err_str);
                 }
             }
         }

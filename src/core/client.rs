@@ -11,6 +11,7 @@ use alloy::{
     signers::{Signer, local::PrivateKeySigner},
 };
 use alloy_chains::Chain;
+use log::{error, info};
 
 pub struct EvmClient<P, N = StrictNonceManager>
 where
@@ -53,11 +54,11 @@ where
         let tx_hash = format!("{url}/tx/{}", receipt.transaction_hash);
         match receipt.status() {
             true => {
-                println!("Transaction successful: {tx_hash}");
+                info!("Transaction successful: {tx_hash}");
                 Ok(())
             }
             false => {
-                println!("Transaction failed: {tx_hash}");
+                error!("Transaction failed: {tx_hash}");
                 Err(Error::TransactionFailed)
             }
         }
