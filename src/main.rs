@@ -1,62 +1,119 @@
-use crate::error::Result;
-use alloy::{
-    network::{Ethereum, EthereumWallet},
-    providers::{Provider, ProviderBuilder},
-    signers::local::PrivateKeySigner,
+use core::{
+    client::EvmClient,
+    kiloex::{AirdropStatus, claim, get_claim_data},
+    token::Token,
+    utils::{random_in_range, read_lines},
 };
-use alloy_chains::Chain;
-use core::{client::EvmClient, kiloex::get_airdrop_data};
-use reqwest::{Client, redirect::Policy};
-use std::{str::FromStr, sync::Arc};
+use std::{str::FromStr, sync::Arc, time::Duration};
 
+use alloy::{providers::ProviderBuilder, signers::local::PrivateKeySigner};
+use alloy_chains::Chain;
+use config::Config;
+use reqwest::{Client, redirect::Policy};
+use url::Url;
+
+use crate::error::Result;
+
+mod config;
 mod core;
 mod error;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    const PK: &str = "";
+    const PRIVATE_KEYS_FILE_PATH: &str = "data/private_keys.txt";
+    const PROXIES_FILE_PATH: &str = "data/proxies.txt";
 
-    let http_client = Client::builder().redirect(Policy::none()).build()?;
+    let config = Arc::new(Config::read_default().await);
+    let private_keys = read_lines(PRIVATE_KEYS_FILE_PATH).await?;
+    let proxies = read_lines(PROXIES_FILE_PATH).await?;
 
-    let signer = PrivateKeySigner::from_str(PK).unwrap();
-    let mut wallet = EthereumWallet::default();
-    wallet.register_signer(signer.clone());
-    let rpc_url = "https://carrot.megaeth.com/rpc".parse()?;
-    let provider = Arc::new(ProviderBuilder::new().wallet(wallet).on_http(rpc_url));
+    if private_keys.len() != proxies.len() && config.use_proxy {
+        eprintln!("Warning: Private keys length not equal proxies length");
+    }
 
-    let evm_client = EvmClient::new(signer, &provider, Chain::from_id(6342));
+    for (i, private_key) in private_keys.iter().enumerate() {
+        let account_num = i + 1;
+        let proxy = if config.use_proxy {
+            Some(proxies[i].clone())
+        } else {
+            None
+        };
 
-    // let airdrop_data = get_airdrop_data(&evm_client, &http_client).await?;
-    // println!("{:?}", airdrop_data);
-п
+        println!("Processing account {}/{}", account_num, private_keys.len());
+
+        match process_account(private_key, proxy, config.clone()).await {
+            Ok(_) => println!(""),
+            Err(e) => eprintln!("Error processing account {}: {}", account_num, e),
+        }
+
+        if account_num < private_keys.len() {
+            let sleep_time = random_in_range(config.sleep_range);
+            println!("Sleep {} seconds", sleep_time);
+            tokio::time::sleep(Duration::from_secs(sleep_time)).await;
+        }
+    }
+
+    println!("All accounts processed!");
+
     Ok(())
 }
 
-// {
-//     inputs: [{
-//         internalType: "uint256",
-//         name: "_rebateAmount",
-//         type: "uint256"
-//     }, {
-//         internalType: "uint256",
-//         name: "_discountShareAmount",
-//         type: "uint256"
-//     }, {
-//         internalType: "uint256",
-//         name: "_xkiloRebateAmount",
-//         type: "uint256"
-//     }, {
-//         internalType: "uint256",
-//         name: "_xkiloDiscountShareAmount",
-//         type: "uint256"
-//     }, {
-//         internalType: "bytes32[]",
-//         name: "_merkleProof",
-//         type: "bytes32[]"
-//     }],
-//     name: "claim",
-//     outputs: [],
-//     stateMutability: "nonpayable",
-//     type: "function"
-// }
-// FixedBytes::from_hex(quote.quote_data.txid).map_err(ClientError::FromHex)?
+pub async fn process_account(
+    private_key: &str,
+    proxy: Option<String>,
+    config: Arc<Config>,
+) -> Result<()> {
+    let mut client_builder = Client::builder().redirect(Policy::none());
+    if config.use_proxy {
+        if let Some(proxy_url) = proxy {
+            client_builder =
+                client_builder.proxy(reqwest::Proxy::all(format!("http://{}", proxy_url))?);
+        }
+    }
+
+    let http_client = client_builder.build()?;
+
+    let signer = PrivateKeySigner::from_str(private_key)?;
+    let provider = ProviderBuilder::new()
+        .disable_recommended_fillers()
+        .on_http(Url::from_str(&config.bsc_rpc)?);
+
+    let evm_client = EvmClient::new(signer, provider, Chain::from_id(56));
+
+    let kiloex_claim_data = get_claim_data(&evm_client, &http_client).await?;
+
+    if kiloex_claim_data.status == AirdropStatus::NotEligible {
+        eprintln!("This wallet is not eligible for airdrop");
+        return Ok(());
+    }
+
+    if let Some(_) = kiloex_claim_data.kilo {
+        match claim(&evm_client, kiloex_claim_data.clone(), Token::KILO).await {
+            Ok(_) => println!("Successfully claimed KILO tokens"),
+            Err(e) => {
+                let err_str = e.to_string();
+                if err_str.contains("Already claimed") {
+                    eprintln!("Airdrop has been claimed earlier");
+                } else {
+                    eprintln!("Failed to claim KILO tokens: {}", err_str);
+                }
+            }
+        }
+    }
+
+    if let Some(_) = kiloex_claim_data.xkilo {
+        match claim(&evm_client, kiloex_claim_data, Token::XKILO).await {
+            Ok(_) => println!("Successfully claimed xKILO tokens"),
+            Err(e) => {
+                let err_str = e.to_string();
+                if err_str.contains("Already claimed") {
+                    eprintln!("Airdrop has been claimed earlier");
+                } else {
+                    eprintln!("Failed to claim xKILO tokens: {}", err_str);
+                }
+            }
+        }
+    }
+
+    Ok(())
+}

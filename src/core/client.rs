@@ -6,25 +6,11 @@ use alloy::{
     consensus::{SignableTransaction, TxEnvelope, TxType, TypedTransaction},
     hex::encode_prefixed,
     network::{Ethereum, TransactionBuilder, TxSigner},
-    primitives::{Address, U256},
     providers::Provider,
     rpc::types::{TransactionReceipt, TransactionRequest},
     signers::{Signer, local::PrivateKeySigner},
-    sol,
-    sol_types::SolCall,
 };
 use alloy_chains::Chain;
-
-use super::token::Token;
-
-sol! {
-    #[sol(rpc)]
-    interface IERC20 {
-        function approve(address spender, uint256 amount) external returns (bool);
-
-        function allowance(address owner, address spender) external view returns (uint256);
-    }
-}
 
 pub struct EvmClient<P, N = StrictNonceManager>
 where
@@ -52,10 +38,6 @@ where
         }
     }
 
-    pub fn address(&self) -> Address {
-        self.signer.address()
-    }
-
     pub async fn sign_message(&self, message: &String) -> Result<String> {
         let signature = self
             .signer
@@ -64,42 +46,6 @@ where
             .map_err(Sign)?;
         let signature = encode_prefixed(signature.as_bytes());
         Ok(signature)
-    }
-
-    pub async fn approve(
-        &self,
-        token: Token,
-        spender: Address,
-        amount: U256,
-        ignore_allowance: bool,
-    ) -> Result<()> {
-        if token.is_native() {
-            return Ok(());
-        }
-
-        let instance = IERC20::new(token.address(), &self.provider);
-
-        let allowance = match ignore_allowance {
-            true => U256::ZERO,
-            false => {
-                instance
-                    .allowance(self.signer.address(), spender)
-                    .call()
-                    .await
-                    .map_err(Error::Contract)?
-                    ._0
-            }
-        };
-
-        if allowance >= amount {
-            return Ok(());
-        }
-
-        let tx = TransactionRequest::default()
-            .with_input(IERC20::approveCall { spender, amount }.abi_encode())
-            .with_to(token.address());
-
-        self.send_transaction(tx, None).await
     }
 
     fn log_receipt(&self, receipt: &TransactionReceipt) -> Result<()> {

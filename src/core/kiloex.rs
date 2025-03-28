@@ -1,6 +1,15 @@
-use super::{client::EvmClient, utils::get_timestamp_utc_now};
-use crate::error::Result;
-use alloy::{network::Ethereum, primitives::Address, providers::Provider};
+use super::{client::EvmClient, token::Token, utils::get_timestamp_utc_now};
+use crate::error::{Error, Result};
+use alloy::{
+    consensus::TxType,
+    hex::FromHex,
+    network::{Ethereum, TransactionBuilder},
+    primitives::{Address, FixedBytes, U256, address},
+    providers::Provider,
+    rpc::types::TransactionRequest,
+    sol,
+    sol_types::SolCall,
+};
 use reqwest::Client;
 use serde::Deserialize;
 use serde_json::from_str;
@@ -22,24 +31,32 @@ impl ResponseData {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum AirdropStatus {
     Eligible,
     NotEligible,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct KiloexClaimData {
-    status: AirdropStatus,
-    kilo: Option<TokenClaimData>,
-    xkilo: Option<TokenClaimData>,
+    pub status: AirdropStatus,
+    pub kilo: Option<TokenClaimData>,
+    pub xkilo: Option<TokenClaimData>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TokenClaimData {
-    amount: u128,
-    proof: Vec<String>,
+    pub amount: u128,
+    pub proof: Vec<String>,
 }
+
+sol!(
+    interface IKiloex {
+        function claim(uint256 rebateAmount, uint256 discountShareAmount, bytes32[] merkleProof) external payable returns (uint256);
+    }
+);
+
+const DEX_CA: Address = address!("0x1CC40B6e8a0b85bD880287f1d50DA1fb24558699");
 
 pub async fn get_sign_nonce(http_client: &Client, address: Address) -> Result<String> {
     let timestamp = get_timestamp_utc_now()?;
@@ -88,7 +105,7 @@ where
     Ok(auth_token)
 }
 
-pub async fn get_airdrop_data<P>(
+pub async fn get_claim_data<P>(
     evm_client: &EvmClient<P>,
     http_client: &Client,
 ) -> Result<KiloexClaimData>
@@ -134,4 +151,44 @@ where
             xkilo: None,
         }),
     }
+}
+
+pub async fn claim<P>(
+    evm_client: &EvmClient<P>,
+    kiloex_claim_data: KiloexClaimData,
+    token: Token,
+) -> Result<()>
+where
+    P: Provider<Ethereum>,
+{
+    let claim_data = match token {
+        Token::KILO => kiloex_claim_data.kilo.ok_or(Error::NoClaimDataAvailable)?,
+        Token::XKILO => kiloex_claim_data.xkilo.ok_or(Error::NoClaimDataAvailable)?,
+    };
+
+    let merkle_proof: Vec<FixedBytes<32>> = claim_data
+        .proof
+        .iter()
+        .map(|proof| FixedBytes::from_hex(proof).map_err(Error::FromHex))
+        .collect::<Result<_>>()?;
+
+    let rebate_amount = match token {
+        Token::KILO => U256::from(0),
+        Token::XKILO => U256::from(1),
+    };
+
+    let tx = TransactionRequest::default()
+        .with_input(
+            IKiloex::claimCall {
+                rebateAmount: rebate_amount,
+                discountShareAmount: U256::from(claim_data.amount),
+                merkleProof: merkle_proof,
+            }
+            .abi_encode(),
+        )
+        .with_to(DEX_CA);
+
+    let claim_amount_ethers = (claim_data.amount / 1e18 as u128) as f64;
+    println!("Try to claim {} {}", claim_amount_ethers, token.ticker());
+    evm_client.send_transaction(tx, Some(TxType::Legacy)).await
 }

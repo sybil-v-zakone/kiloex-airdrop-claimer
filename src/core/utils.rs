@@ -1,4 +1,5 @@
 use crate::error::Result;
+use rand::{Rng, distr::uniform::SampleUniform};
 use std::{
     path::Path,
     time::{SystemTime, UNIX_EPOCH},
@@ -23,4 +24,20 @@ pub async fn read_lines(path: impl AsRef<Path>) -> Result<Vec<String>> {
 
 pub fn get_timestamp_utc_now() -> Result<u64> {
     Ok(SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs())
+}
+
+pub fn random_in_range<T>(range: [T; 2]) -> T
+where
+    T: SampleUniform + PartialOrd + Copy,
+{
+    let start = range[0];
+    let end = range[1];
+
+    let inclusive_range = if start <= end {
+        start..=end
+    } else {
+        end..=start
+    };
+
+    rand::rng().random_range(inclusive_range)
 }

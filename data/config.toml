@@ -1,0 +1,8 @@
+# BSC HTTP RPC URL
+bsc_rpc = "https://bsc.blockrazor.xyz"
+
+# Time range between transactions
+sleep_range = [5, 10]
+
+# Set to "true" if you want to use proxy for http requests
+use_proxy = false

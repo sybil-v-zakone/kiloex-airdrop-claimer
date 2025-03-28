@@ -3,6 +3,7 @@ use alloy::{
     hex,
     network::{Ethereum, UnbuiltTransactionError},
     providers::{MulticallError, PendingTransactionError},
+    signers::local::LocalSignerError,
     transports::{RpcError as RpcErr, TransportErrorKind},
 };
 use std::{string::ParseError, time::SystemTimeError};
@@ -14,6 +15,9 @@ pub type Result<T> = std::result::Result<T, Error>;
 pub enum Error {
     #[error(transparent)]
     Sign(#[from] alloy::signers::Error),
+
+    #[error(transparent)]
+    LocalSignerError(#[from] LocalSignerError),
 
     #[error(transparent)]
     Io(#[from] std::io::Error),
@@ -59,4 +63,7 @@ pub enum Error {
 
     #[error(transparent)]
     Multicall(#[from] MulticallError),
+
+    #[error("No claim data available for this token")]
+    NoClaimDataAvailable,
 }
