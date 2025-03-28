@@ -38,8 +38,8 @@ async fn main() -> Result<()> {
 
     for (i, private_key) in private_keys.iter().enumerate() {
         let account_num = i + 1;
-        let proxy = if config.use_proxy {
-            Some(proxies[i].clone())
+        let proxy = if config.use_proxy && i < proxies.len() {
+            proxies.get(i).cloned()
         } else {
             None
         };
